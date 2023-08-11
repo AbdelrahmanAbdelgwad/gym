@@ -3327,20 +3327,16 @@ class CarRacingSharedStablebaselines3(CarRacing):
             state = obs[:, :, 0 : self.frames_per_state]
 
         if self.pilot_type == "noisy_pilot":
-            # print("noisy_pilot")
             self.pi_action, _ = self.pilot.predict(state)
             if np.random.random() < self.RANDOM_ACTION_PROB:
                 self.pi_action = self.action_space.sample()
         elif self.pilot_type == "laggy_pilot":
-            # print("laggy_pilot")
             if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
                 self.pi_action, _ = self.pilot.predict(state)
             self.laggy_pilot_counter += 1
         elif self.pilot_type == "none_pilot":
-            # print("none_pilot")
             self.pi_action = 0
         elif self.pilot_type == "optimal_pilot":
-            # print("optimal_pilot")
             self.pi_action, _ = self.pilot.predict(state)
         pi_action_steering = self._transform_action(self.pi_action)[0]
 
@@ -3355,8 +3351,6 @@ class CarRacingSharedStablebaselines3(CarRacing):
         return obs
 
     def step(self, action):
-        # action, _ = self.pilot.predict(self.state[:,:,0:4])
-        # print(action)
         action = self._transform_action(action)
 
         if action is not None:
@@ -3392,27 +3386,18 @@ class CarRacingSharedStablebaselines3(CarRacing):
             state = self.state[:, :, 0 : self.frames_per_state]
 
         if self.pilot_type == "noisy_pilot":
-            # print("noisy_pilot")
             self.pi_action, _ = self.pilot.predict(state)
             if np.random.random() < self.RANDOM_ACTION_PROB:
                 self.pi_action = self.action_space.sample()
         elif self.pilot_type == "laggy_pilot":
-            # print("laggy_pilot")
-            # print(self.laggy_pilot_counter % self.laggy_pilot_freq == 0)
             if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
                 self.pi_action, _ = self.pilot.predict(state)
             self.laggy_pilot_counter += 1
         elif self.pilot_type == "none_pilot":
-            # print("none_pilot")
             self.pi_action = 0
         elif self.pilot_type == "optimal_pilot":
-            # print("optimal_pilot")
             self.pi_action, _ = self.pilot.predict(state)
-        # print("Inside Step")
-        print("Env", self.pi_action)
         pi_action_steering = self._transform_action(self.pi_action)[0]
-        print("Env_steer", pi_action_steering)
-        # print("Env",pi_frame[0][0], pi_action_steering)
 
         if self.use_dict_obs_space:
             obs = {"frames": state, "human_action": np.array([pi_action_steering])}
