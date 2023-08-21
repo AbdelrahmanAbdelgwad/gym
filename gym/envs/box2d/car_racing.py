@@ -27,6 +27,10 @@ from gym.utils import colorize, seeding, EzPickle
 import pyglet
 from pyglet import gl
 
+import matplotlib.pyplot as plt
+import cv2
+
+
 # Easiest continuous control task to learn from pixels, a top-down racing environment.
 # Discreet control is reasonable in this environment as well, on/off discretisation is
 # fine.
@@ -2989,7 +2993,7 @@ class CarRacingShared(CarRacing):
             )  # steer, gas, brake
         state_shape[-1] += 1
         self.observation_space = spaces.Box(
-            low=0, high=255, shape=state_shape, dtype=np.uint8
+            low=0, high=255, shape=state_shape, dtype=np.float64
         )
 
         # Set custom reward function
@@ -3086,7 +3090,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
         pilot_type: str,
         random_action_prob: float,
         laggy_pilot_freq: int,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.pilot = DQN.load(pilot)
@@ -3095,6 +3099,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
         self.laggy_pilot_freq = laggy_pilot_freq
         self.laggy_pilot_counter = 0
         self.pi_action = 0
+        self.total_timesteps = 0
 
     def _set_config(
         self,
@@ -3237,7 +3242,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
                         low=0,
                         high=255,
                         shape=(STATE_H, STATE_W, self.frames_per_state),
-                        dtype=np.uint8,
+                        dtype=np.float64,
                     ),
                     "human_action": spaces.Box(
                         low=-1, high=1, shape=(1,), dtype=np.float32
@@ -3249,7 +3254,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
                 low=0,
                 high=255,
                 shape=(STATE_H, STATE_W, frames_per_state + 1),
-                dtype=np.uint8,
+                dtype=np.float64,
             )
 
         # Set custom reward function
@@ -3351,6 +3356,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
         return obs
 
     def step(self, action):
+        self.total_timesteps += 1
         action = self._transform_action(action)
 
         if action is not None:
@@ -3403,10 +3409,21 @@ class CarRacingSharedStablebaselines3(CarRacing):
             obs = {"frames": state, "human_action": np.array([pi_action_steering])}
         else:
             pi_action_steering_frame = (
-                np.ones((state.shape[0], state.shape[1])) * pi_action_steering
+                np.zeros((state.shape[0], state.shape[1]), dtype=np.int16)
+                + pi_action_steering
             )
             obs = self.state
             obs[:, :, -1] = pi_action_steering_frame
+
+            # Save the values and boolean flags for each channel
+
+            with open(
+                f"./obs_values/obs_values_{math.floor(self.total_timesteps / 1000)}.txt",
+                "a",
+            ) as file:
+                channel = obs[:, :, -1]
+                all_values_equal = np.all(channel == channel[0, 0])
+                file.write(f"{channel[0, 0]} {all_values_equal}\n")
 
         return obs, step_reward, done, {}
 
