@@ -30,6 +30,7 @@ from pyglet import gl
 import matplotlib.pyplot as plt
 import cv2
 
+# from pynput import keyboard
 
 # Easiest continuous control task to learn from pixels, a top-down racing environment.
 # Discreet control is reasonable in this environment as well, on/off discretisation is
@@ -117,32 +118,6 @@ SHOW_BETA_PI_ANGLE = 0  # Shows the direction of the beta+pi/2 angle in each til
 # do not modify it if you dont know what you are doing, this can have slight changes
 # in the behaviour of the game and you will not realise
 FORBID_HARD_TURNS_IN_INTERSECTIONS = False
-
-
-# def disc2cont(action):
-#     if action == 0:
-#         action = [0, 0.4, 0.1]  # "NOTHING"
-#     if action == 1:
-#         action = [-0.2, 0.4, 0.05]  # LEFT_LEVEL_1
-#     if action == 2:
-#         action = [-0.4, 0.4, 0.05]  # LEFT_LEVEL_2
-#     if action == 3:
-#         action = [-0.6, 0.4, 0.05]  # LEFT_LEVEL_3
-#     if action == 4:
-#         action = [-0.8, 0.4, 0.05]  # LEFT_LEVEL_4
-#     if action == 5:
-#         action = [-1, 0.4, 0.05]  # LEFT_LEVEL_5
-#     if action == 6:
-#         action = [0.2, 0.4, 0.05]  # RIGHT_LEVEL_1
-#     if action == 7:
-#         action = [0.4, 0.4, 0.05]  # RIGHT_LEVEL_2
-#     if action == 8:
-#         action = [0.6, 0.4, 0.05]  # RIGHT_LEVEL_3
-#     if action == 9:
-#         action = [0.8, 0.4, 0.05]  # RIGHT_LEVEL_4
-#     if action == 10:
-#         action = [1, 0.4, 0.05]  # RIGHT_LEVEL_5
-#     return action
 
 
 def key_press_example(k, mod):
@@ -261,6 +236,47 @@ def default_reward_callback(env):
             reward -= HARD_NEG_REWARD
 
     return reward, full_reward, done
+
+
+def map_val(
+    input: float,
+    input_min: float,
+    input_max: float,
+    output_min: float,
+    output_max: float,
+) -> float:
+    output = (
+        ((input - input_min) / (input_max - input_min)) * (output_max - output_min)
+    ) + output_min
+    return output
+
+
+def steering2action(action):
+    tolerance = 0.01  # Adjust this tolerance as needed
+
+    if abs(action - 0) <= tolerance:
+        action = 0  # "NOTHING"
+    elif abs(action - (-0.2)) <= tolerance:
+        action = 1  # LEFT_LEVEL_1
+    elif abs(action - (-0.4)) <= tolerance:
+        action = 2  # LEFT_LEVEL_2
+    elif abs(action - (-0.6)) <= tolerance:
+        action = 3  # LEFT_LEVEL_3
+    elif abs(action - (-0.8)) <= tolerance:
+        action = 4  # LEFT_LEVEL_4
+    elif abs(action - (-1)) <= tolerance:
+        action = 5  # LEFT_LEVEL_5
+    elif abs(action - 0.2) <= tolerance:
+        action = 6  # RIGHT_LEVEL_1
+    elif abs(action - 0.4) <= tolerance:
+        action = 7  # RIGHT_LEVEL_2
+    elif abs(action - 0.6) <= tolerance:
+        action = 8  # RIGHT_LEVEL_3
+    elif abs(action - 0.8) <= tolerance:
+        action = 9  # RIGHT_LEVEL_4
+    elif abs(action - 1) <= tolerance:
+        action = 10  # RIGHT_LEVEL_5
+    return action
 
 
 class FrictionDetector(contactListener):
@@ -505,6 +521,7 @@ class CarRacing(gym.Env, EzPickle):
         self._set_config(**kwargs)
         self._org_config = deepcopy(kwargs)
         self._steps_in_episode = 0
+        self.human_keyboard_input = 0
 
     def _set_config(
         self,
@@ -2300,6 +2317,14 @@ class CarRacing(gym.Env, EzPickle):
             self.auto_render = not self.auto_render
         if k == key.T:  # T from Take screnshot
             self.screenshot()
+        if k == key.D:
+            self.human_keyboard_input += 0.2
+            self.human_keyboard_input = min(self.human_keyboard_input, 1)
+        if k == key.A:
+            self.human_keyboard_input += -0.2
+            self.human_keyboard_input = max(self.human_keyboard_input, -1)
+        if k == key.W:
+            self.human_keyboard_input = 0
 
         if self.key_press_fn is not None:
             self.key_press_fn(k, mod)
@@ -2993,7 +3018,7 @@ class CarRacingShared(CarRacing):
             )  # steer, gas, brake
         state_shape[-1] += 1
         self.observation_space = spaces.Box(
-            low=0, high=255, shape=state_shape, dtype=np.float64
+            low=0, high=255, shape=state_shape, dtype=np.uint8
         )
 
         # Set custom reward function
@@ -3242,7 +3267,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
                         low=0,
                         high=255,
                         shape=(STATE_H, STATE_W, self.frames_per_state),
-                        dtype=np.float64,
+                        dtype=np.uint8,
                     ),
                     "human_action": spaces.Box(
                         low=-1, high=1, shape=(1,), dtype=np.float32
@@ -3254,7 +3279,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
                 low=0,
                 high=255,
                 shape=(STATE_H, STATE_W, frames_per_state + 1),
-                dtype=np.float64,
+                dtype=np.uint8,
             )
 
         # Set custom reward function
@@ -3343,13 +3368,23 @@ class CarRacingSharedStablebaselines3(CarRacing):
             self.pi_action = 0
         elif self.pilot_type == "optimal_pilot":
             self.pi_action, _ = self.pilot.predict(state)
+        elif self.pilot_type == "human_keyboard":
+            self.human_keyboard_input
+            self.human_keyboard_input = round(self.human_keyboard_input, 1)
+            self.pi_action = steering2action(self.human_keyboard_input)
+            print(self.human_keyboard_input)
+        else:
+            AssertionError()
+
         pi_action_steering = self._transform_action(self.pi_action)[0]
 
         if self.use_dict_obs_space:
             obs = {"frames": state, "human_action": np.array([pi_action_steering])}
         else:
+            pi_action_steering_mapped = map_val(pi_action_steering, -1, 1, 0, 255)
             pi_action_steering_frame = (
-                np.ones((state.shape[0], state.shape[1])) * pi_action_steering
+                np.zeros((state.shape[0], state.shape[1]), dtype=np.int16)
+                + pi_action_steering_mapped
             )
             obs[:, :, -1] = pi_action_steering_frame
 
@@ -3403,27 +3438,25 @@ class CarRacingSharedStablebaselines3(CarRacing):
             self.pi_action = 0
         elif self.pilot_type == "optimal_pilot":
             self.pi_action, _ = self.pilot.predict(state)
+        elif self.pilot_type == "human_keyboard":
+            self.human_keyboard_input = round(self.human_keyboard_input, 1)
+            self.pi_action = steering2action(self.human_keyboard_input)
+            print(self.human_keyboard_input)
+        else:
+            AssertionError()
         pi_action_steering = self._transform_action(self.pi_action)[0]
+        # print("Env", self.pi_action)
 
         if self.use_dict_obs_space:
             obs = {"frames": state, "human_action": np.array([pi_action_steering])}
         else:
+            pi_action_steering_mapped = map_val(pi_action_steering, -1, 1, 0, 255)
             pi_action_steering_frame = (
                 np.zeros((state.shape[0], state.shape[1]), dtype=np.int16)
-                + pi_action_steering
+                + pi_action_steering_mapped
             )
             obs = self.state
             obs[:, :, -1] = pi_action_steering_frame
-
-            # Save the values and boolean flags for each channel
-
-            with open(
-                f"./obs_values/obs_values_{math.floor(self.total_timesteps / 1000)}.txt",
-                "a",
-            ) as file:
-                channel = obs[:, :, -1]
-                all_values_equal = np.all(channel == channel[0, 0])
-                file.write(f"{channel[0, 0]} {all_values_equal}\n")
 
         return obs, step_reward, done, {}
 
