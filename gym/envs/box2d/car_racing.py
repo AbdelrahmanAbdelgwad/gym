@@ -516,7 +516,17 @@ class CarRacing(gym.Env, EzPickle):
         self.fd_tile = fixtureDef(
             shape=polygonShape(vertices=[(0, 0), (1, 0), (1, -1), (0, -1)])
         )
-
+        self.total_reward = 0
+        self.statistics = pd.DataFrame(
+            columns=[
+                "total_steps",
+                "episode_steps",
+                "scenario",
+                "total_reward",
+                "episode_reward",
+                "reward",
+            ]
+        )
         # Config
         self._set_config(**kwargs)
         self._org_config = deepcopy(kwargs)
@@ -549,6 +559,7 @@ class CarRacing(gym.Env, EzPickle):
         allow_outside=True,
         load_tracks_from=None,
         display=None,
+        scenario="train",
     ):
         self.allow_outside = allow_outside
         self.auto_render = auto_render
@@ -558,6 +569,7 @@ class CarRacing(gym.Env, EzPickle):
         self.verbose = verbose
         self.animate_zoom = animate_zoom
         self.display = display
+        self.scenario = scenario
         if load_tracks_from is not None:
             if os.path.isdir(load_tracks_from):
                 self.load_tracks_from = load_tracks_from
@@ -2125,6 +2137,8 @@ class CarRacing(gym.Env, EzPickle):
         return action
 
     def step(self, action):
+        self.total_reward += 1
+        self.total_timesteps += 1
         action = self._transform_action(action)
 
         if action is not None:
@@ -2150,6 +2164,15 @@ class CarRacing(gym.Env, EzPickle):
 
         self.reward += step_reward
         self.full_reward += full_step_reward
+
+        self.statistics.loc[len(self.statistics)] = [  # type: ignore
+            self.total_timesteps,
+            self._steps_in_episode,
+            "robot_env_" + self.scenario,
+            self.total_reward,
+            self._steps_in_episode,
+            self.full_reward,
+        ]
 
         if self.auto_render:
             self.render()
@@ -2317,13 +2340,13 @@ class CarRacing(gym.Env, EzPickle):
             self.auto_render = not self.auto_render
         if k == key.T:  # T from Take screnshot
             self.screenshot()
-        if k == key.D:
+        if k == key.RIGHT:
             self.human_keyboard_input += 0.2
             self.human_keyboard_input = min(self.human_keyboard_input, 1)
-        if k == key.A:
+        if k == key.LEFT:
             self.human_keyboard_input += -0.2
             self.human_keyboard_input = max(self.human_keyboard_input, -1)
-        if k == key.W:
+        if k == key.UP:
             self.human_keyboard_input = 0
 
         if self.key_press_fn is not None:
@@ -3072,6 +3095,8 @@ class CarRacingShared(CarRacing):
         return obs
 
     def step(self, action, pi_action):
+        self.total_timesteps += 1
+        self.total_reward += 1
         action = self._transform_action(action)
 
         if action is not None:
@@ -3097,6 +3122,14 @@ class CarRacingShared(CarRacing):
 
         self.reward += step_reward
         self.full_reward += full_step_reward
+        self.statistics.loc[len(self.statistics)] = [  # type: ignore
+            self.total_timesteps,
+            self._steps_in_episode,
+            "robot_env_" + self.scenario,
+            self.total_reward,
+            self._steps_in_episode,
+            self.full_reward,
+        ]
 
         if self.auto_render:
             self.render()
@@ -3153,6 +3186,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
         load_tracks_from=None,
         display=None,
         use_dict_obs_space=False,
+        scenario="train",
     ):
         self.allow_outside = allow_outside
         self.auto_render = auto_render
@@ -3163,6 +3197,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
         self.animate_zoom = animate_zoom
         self.display = display
         self.use_dict_obs_space = use_dict_obs_space
+        self.scenario = scenario
 
         if load_tracks_from is not None:
             if os.path.isdir(load_tracks_from):
@@ -3392,6 +3427,7 @@ class CarRacingSharedStablebaselines3(CarRacing):
 
     def step(self, action):
         self.total_timesteps += 1
+        self.total_reward += 1
         action = self._transform_action(action)
 
         if action is not None:
@@ -3417,7 +3453,14 @@ class CarRacingSharedStablebaselines3(CarRacing):
 
         self.reward += step_reward
         self.full_reward += full_step_reward
-
+        self.statistics.loc[len(self.statistics)] = [  # type: ignore
+            self.total_timesteps,
+            self._steps_in_episode,
+            "robot_env_" + self.scenario,
+            self.total_reward,
+            self._steps_in_episode,
+            self.full_reward,
+        ]
         if self.auto_render:
             self.render()
 
@@ -3457,6 +3500,15 @@ class CarRacingSharedStablebaselines3(CarRacing):
             )
             obs = self.state
             obs[:, :, -1] = pi_action_steering_frame
+
+        # if done:
+        #     human_reward_feedback = int(
+        #         input("Please enter reward for agent either 100 or 0: ")
+        #     )
+        # else:
+        #     human_reward_feedback = 0
+
+        # step_reward += human_reward_feedback
 
         return obs, step_reward, done, {}
 
