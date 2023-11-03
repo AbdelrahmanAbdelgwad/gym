@@ -532,6 +532,7 @@ class CarRacing(gym.Env, EzPickle):
         self._org_config = deepcopy(kwargs)
         self._steps_in_episode = 0
         self.human_keyboard_input = 0
+        self.total_timesteps = 0
 
     def _set_config(
         self,
