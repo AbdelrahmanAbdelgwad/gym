@@ -2261,7 +2261,7 @@ class CarRacing(gym.Env, EzPickle):
         self.t += 1.0 / FPS
 
         # self.state = self.render("state_pixels") # Old code, only one frame
-        self._update_state(self.render("state_pixels"))
+        self._update_state(self.render("state_pixels")[0])
 
         step_reward = 0
         full_step_reward = 0
@@ -2416,6 +2416,7 @@ class CarRacing(gym.Env, EzPickle):
             arr = np.fromstring(image_data.data, dtype=np.uint8, sep="")
             arr = arr.reshape(VP_H, VP_W, 4)
             arr = arr[::-1, :, 0:3]
+            rgb_array = arr
             if self.grayscale and mode != "rgb_array":
                 arr_bw = np.dot(arr[..., :3], [0.299, 0.587, 0.114])
                 arr = arr_bw
@@ -2438,9 +2439,11 @@ class CarRacing(gym.Env, EzPickle):
             self.render_indicators(WINDOW_W, WINDOW_H)
             self._render_additional_objects()
             win.flip()
+            arr = None
+            rgb_array = None
 
         self.viewer.onetime_geoms = []
-        return arr
+        return arr, rgb_array
 
     def _key_press(self, k, mod):
         from pyglet.window import key
@@ -3031,14 +3034,33 @@ class CarRacingShared(CarRacing):
         pilot_type: str,
         random_action_prob: float,
         laggy_pilot_freq: int,
+        Kp: float = 0.03,
+        Ki: float = 0.01,
+        Kd: float = 0.1,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.pilot = DQN.load(pilot)
-        self.RANDOM_ACTION_PROB = random_action_prob
         self.pilot_type = pilot_type
-        self.laggy_pilot_freq = laggy_pilot_freq
-        self.laggy_pilot_counter = 0
+
+        if self.pilot_type == "PID_pilot":
+            self.previous_error = 0
+            self.Kp = Kp
+            self.Ki = Ki
+            self.Kd = Kd
+        else:
+            self.pilot = DQN.load(pilot)
+
+        if self.pilot_type == "noisy_pilot":
+            self.random_action_prob = random_action_prob
+        else:
+            pass
+
+        if self.pilot_type == "laggy_pilot":
+            self.laggy_pilot_freq = laggy_pilot_freq
+            self.laggy_pilot_counter = 0
+        else:
+            pass
+
         self.pi_action = 0
         self.total_timesteps = 0
 
@@ -3070,9 +3092,6 @@ class CarRacingShared(CarRacing):
         display=None,
         obs_space="frames",
         scenario="train",
-        Kp=0.03,
-        Ki=0.01,
-        Kd=0.1,
     ):
         self.allow_outside = allow_outside
         self.auto_render = auto_render
@@ -3084,10 +3103,6 @@ class CarRacingShared(CarRacing):
         self.display = display
         self.obs_space = obs_space
         self.scenario = scenario
-        self.previous_error = 0
-        self.Kp = Kp
-        self.Ki = Ki
-        self.Kd = Kd
 
         if load_tracks_from is not None:
             if os.path.isdir(load_tracks_from):
@@ -3126,7 +3141,10 @@ class CarRacingShared(CarRacing):
         # Max time out of track
         self.max_time_out = max_time_out if max_time_out >= 0 else 2.0
 
-        # Grayscale
+        # Grayscale or RGB
+        # If the state is RGB then force the frames_per_state to be 1
+        # because there is no support for several frames in RGB
+        # state_shape = [STATE_H, STATE_W, 3]
         self.grayscale = grayscale
         state_shape = [STATE_H, STATE_W]
         if not self.grayscale:
@@ -3140,20 +3158,15 @@ class CarRacingShared(CarRacing):
         # Show or not back bottom info panel
         self.show_info_panel = show_info_panel
 
-        # Frames per state
+        # If frames_per_state > 1 then the mode must be grayscale and not RGB
+        # state_shape = [STATE_H, STATE_W, frames_per_state]
         self.frames_per_state = frames_per_state if frames_per_state > 0 else 1
-        if self.obs_space == "dict":
-            if self.frames_per_state > 1:
-                state_shape.append(self.frames_per_state)
 
-                lst = list(range(self.frames_per_state))
-                self._update_index = [lst[-1]] + lst[:-1]
-        elif self.obs_space == "frames":
-            if self.frames_per_state > 1:
-                state_shape.append(self.frames_per_state)
+        if self.frames_per_state > 1:
+            state_shape.append(self.frames_per_state)
 
-                lst = list(range(self.frames_per_state))
-                self._update_index = [lst[-1]] + lst[:-1]
+            lst = list(range(self.frames_per_state))
+            self._update_index = [lst[-1]] + lst[:-1]
 
         self.discretize_actions = (
             discretize_actions
@@ -3196,7 +3209,9 @@ class CarRacingShared(CarRacing):
                     "frames": spaces.Box(
                         low=0,
                         high=255,
-                        shape=(STATE_H, STATE_W, self.frames_per_state),
+                        shape=(STATE_H, STATE_W, self.frames_per_state)
+                        if self.grayscale
+                        else (STATE_H, STATE_W, 3),
                         dtype=np.uint8,
                     ),
                     "human_action": spaces.Box(
@@ -3205,38 +3220,36 @@ class CarRacingShared(CarRacing):
                 }
             )
         elif self.obs_space == "frames":
-            if self.grayscale:
-                self.observation_space = spaces.Box(
-                    low=0,
-                    high=255,
-                    shape=(STATE_H, STATE_W, frames_per_state + 1),
-                    dtype=np.uint8,
-                )
-            else:
-                self.observation_space = spaces.Box(
-                    low=0,
-                    high=255,
-                    shape=(STATE_H, STATE_W, 4),
-                    dtype=np.uint8,
-                )
+            self.observation_space = spaces.Box(
+                low=0,
+                high=255,
+                shape=(STATE_H, STATE_W, self.frames_per_state + 1)
+                if self.grayscale
+                else (STATE_H, STATE_W, 4),
+                dtype=np.uint8,
+            )
+        elif self.obs_space == "vector":
+            self.observation_space = spaces.Box(
+                low=-100, high=100, shape=(2,), dtype=np.float32
+            )
 
         # Set custom reward function
         self.contactListener_keepref = FrictionDetector(self)
         self.world = Box2D.b2World((0, 0), contactListener=self.contactListener_keepref)
 
-    def _update_state(self, new_frame):
-        if self.obs_space == "dict":
-            if self.frames_per_state > 1:
-                self.state["frames"][:, :, -1] = new_frame
-                self.state["frames"] = self.state["frames"][:, :, self._update_index]
-            else:
-                self.state["frames"] = new_frame
-        elif self.obs_space == "frames":
-            if self.frames_per_state > 1:
-                self.state[:, :, -1] = new_frame
-                self.state = self.state[:, :, self._update_index]
-            else:
-                self.state = new_frame
+    # def _update_state(self, new_frame):
+    #     if self.obs_space == "dict":
+    #         if self.frames_per_state > 1:
+    #             self.state["frames"][:, :, -1] = new_frame
+    #             self.state["frames"] = self.state["frames"][:, :, self._update_index]
+    #         else:
+    #             self.state["frames"] = new_frame
+    #     elif self.obs_space == "frames":
+    #         if self.frames_per_state > 1:
+    #             self.state[:, :, -1] = new_frame
+    #             self.state = self.state[:, :, self._update_index]
+    #         else:
+    #             self.state = new_frame
 
     def reset(self):
         """
@@ -3263,13 +3276,17 @@ class CarRacingShared(CarRacing):
         self.road = []
         self.track_lanes = None
         self.human_render = False
-        if self.obs_space == "dict":
-            self.state = {
-                "frames": np.zeros((STATE_H, STATE_W, self.frames_per_state)),
-                "human_action": np.zeros((1,)),
-            }
-        elif self.obs_space == "frames":
+        # if self.obs_space == "dict":
+        #     self.state = {
+        #         "frames": np.zeros((STATE_H, STATE_W, self.frames_per_state)),
+        #         "human_action": np.zeros((1,)),
+        #     }
+        # elif self.obs_space == "frames":
+
+        if self.grayscale:
             self.state = np.zeros((STATE_H, STATE_W, self.frames_per_state))
+        else:
+            self.state = np.zeros((STATE_H, STATE_W, 3))
 
         self._steps_in_episode = 0
 
@@ -3296,10 +3313,13 @@ class CarRacingShared(CarRacing):
                 state = obs[:, :, 0 : self.frames_per_state]
             else:
                 state = obs[:, :, 0:3]
+        else:
+            # in vector observation, we do not support the RGB observation for pilots
+            state = self.state
 
         if self.pilot_type == "noisy_pilot":
             self.pi_action, _ = self.pilot.predict(state)
-            if np.random.random() < self.RANDOM_ACTION_PROB:
+            if np.random.random() < self.random_action_prob:
                 self.pi_action = self.action_space.sample()
         elif self.pilot_type == "laggy_pilot":
             if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
@@ -3315,7 +3335,8 @@ class CarRacingShared(CarRacing):
             self.pi_action = steering2action(self.human_keyboard_input)
             print(self.human_keyboard_input)
         elif self.pilot_type == "PID_pilot":
-            error = find_error(state, self.previous_error)
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
             steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
             self.pi_action = [steering, 0.3, 0.05]
             self.previous_error = error
@@ -3333,6 +3354,11 @@ class CarRacingShared(CarRacing):
                 + pi_action_steering_mapped
             )
             obs[:, :, -1] = pi_action_steering_frame
+        elif self.obs_space == "vector":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            obs[0] = error
+            obs[1] = pi_action_steering
         return obs
 
     def step(self, action):
@@ -3351,7 +3377,7 @@ class CarRacingShared(CarRacing):
         self.t += 1.0 / FPS
 
         # self.state = self.render("state_pixels")  # Old code, only one frame
-        self._update_state(self.render("state_pixels"))
+        self._update_state(self.render("state_pixels")[0])
 
         step_reward = 0
         full_step_reward = 0
@@ -3374,28 +3400,30 @@ class CarRacingShared(CarRacing):
         if self.auto_render:
             self.render()
 
-        if self.obs_space == "dict":
-            state = self.state["frames"]
-        elif self.obs_space == "frames":
-            state = self.state
+        # if self.obs_space == "dict":
+        #     state = self.state["frames"]
+        # elif self.obs_space == "frames":
+        #     state = self.state
+
         if self.pilot_type == "noisy_pilot":
-            self.pi_action, _ = self.pilot.predict(state)
-            if np.random.random() < self.RANDOM_ACTION_PROB:
+            self.pi_action, _ = self.pilot.predict(self.state)
+            if np.random.random() < self.random_action_prob:
                 self.pi_action = self.action_space.sample()
         elif self.pilot_type == "laggy_pilot":
             if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
-                self.pi_action, _ = self.pilot.predict(state)
+                self.pi_action, _ = self.pilot.predict(self.state)
             self.laggy_pilot_counter += 1
         elif self.pilot_type == "none_pilot":
             self.pi_action = 0
         elif self.pilot_type == "optimal_pilot":
-            self.pi_action, _ = self.pilot.predict(state)
+            self.pi_action, _ = self.pilot.predict(self.state)
         elif self.pilot_type == "human_keyboard":
             self.human_keyboard_input = round(self.human_keyboard_input, 1)
             self.pi_action = steering2action(self.human_keyboard_input)
             print(self.human_keyboard_input)
         elif self.pilot_type == "PID_pilot":
-            error = find_error(state, self.previous_error)
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
             steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
             self.pi_action = [steering, 0.3, 0.05]
             self.previous_error = error
@@ -3406,16 +3434,20 @@ class CarRacingShared(CarRacing):
         # print("Env", self.pi_action)
 
         if self.obs_space == "dict":
-            obs = {"frames": state, "human_action": np.array([pi_action_steering])}
+            obs = {"frames": self.state, "human_action": np.array([pi_action_steering])}
         elif self.obs_space == "frames":
             pi_action_steering_mapped = map_val(pi_action_steering, -1, 1, 0, 255)
             pi_action_steering_frame = (
-                np.zeros((state.shape[0], state.shape[1], 1), dtype=np.int16)
+                np.zeros((self.state.shape[0], self.state.shape[1], 1), dtype=np.int16)
                 + pi_action_steering_mapped
             )
 
             obs = np.append(self.state, pi_action_steering_frame, axis=2)
             # obs[:, :, -1] = pi_action_steering_frame
+        elif self.obs_space == "vector":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            obs = np.array([error, pi_action_steering], dtype=np.float32)
 
         # if done:
         #     human_reward_feedback = int(
