@@ -2189,6 +2189,8 @@ class CarRacing(gym.Env, EzPickle):
             self.state = new_frame
 
     def _transform_action(self, action):
+        if action == None:
+            return action
         if self.discretize_actions == "residual_steering":
             if action == 0:
                 action = [0, 0.3, 0.05]
@@ -2212,7 +2214,7 @@ class CarRacing(gym.Env, EzPickle):
                 action = [0.2, 0.3, 0.05]
             if action == 10:
                 action = [0.25, 0.3, 0.05]
-        if self.discretize_actions == "smooth_steering":
+        elif self.discretize_actions == "smooth_steering":
             # "NOTHING", LEFT_LEVEL_1, LEFT_LEVEL_2, LEFT_LEVEL_3, LEFT_LEVEL_4,
             # LEFT_LEVEL_5, RIGHT_LEVEL_1 , RIGHT_LEVEL_2, RIGHT_LEVEL_3, RIGHT_LEVEL_4,
             # RIGHT_LEVEL_5
@@ -2240,7 +2242,7 @@ class CarRacing(gym.Env, EzPickle):
                 action = [0.8, 0.3, 0.05]  # RIGHT_LEVEL_4
             if action == 10:
                 action = [1, 0.3, 0.05]  # RIGHT_LEVEL_5
-        if self.discretize_actions == "smooth":
+        elif self.discretize_actions == "smooth":
             # "NOTHING", # LEFT_LEVEL_1, # LEFT_LEVEL_2, # LEFT_LEVEL_3, # LEFT_LEVEL_4,
             # # LEFT_LEVEL_5, RIGHT_LEVEL_1 , # RIGHT_LEVEL_2, # RIGHT_LEVEL_3, # RIGHT_LEVEL_4,
             # # RIGHT_LEVEL_5, "SOFT_ACCELERATE", "HARD_ACCELERATE", "SOFT_BREAK", "HARD_BREAK"
@@ -2275,31 +2277,31 @@ class CarRacing(gym.Env, EzPickle):
             if action == 14:
                 action = [0, 0, 0.8]  # HARD_BREAK
 
-        if self.discretize_actions == "f_smooth":
+        elif self.discretize_actions == "f_smooth":
             if action == 0:
                 action = [0, 0, 0.0]  # "NOTHING"
-            if 1 <= action <= 10:
+            elif 1 <= action <= 10:
                 action = [-0.1 * action, 0, 0.0]
-            if 11 <= action <= 20:
+            elif 11 <= action <= 20:
                 action = [0.1 * (action - 10), 0, 0.0]
-            if action == 21:
+            elif action == 21:
                 action = [0, +0.5, 0.0]  # SOFT_ACCELERATE
-            if action == 22:
+            elif action == 22:
                 action = [0, +1, 0.0]  # HARD_ACCELERATE
-            if action == 23:
+            elif action == 23:
                 action = [0, 0, 0.4]  # SOFT_BREAK
-            if action == 24:
+            elif action == 24:
                 action = [0, 0, 0.8]  # HARD_BREAK
 
-        if self.discretize_actions == "f_smooth_steering":
+        elif self.discretize_actions == "f_smooth_steering":
             if action == 0:
                 action = [0, 0.3, 0.05]  # "NOTHING"
-            if 1 <= action <= 10:
+            elif 1 <= action <= 10:
                 action = [-0.1 * action, 0.3, 0.05]  # LEFT_LEVEL_1_to_10
-            if 11 <= action <= 20:
+            elif 11 <= action <= 20:
                 action = [0.1 * (action - 10), 0.3, 0.05]  # RIGHT_LEVEL_1_to_10
 
-        if self.discretize_actions == "soft":
+        elif self.discretize_actions == "soft":
             # "NOTHING", "SOFT_LEFT", "HARD_LEFT", "SOFT_RIGHT", "HARD_RIGHT",
             # "SOFT_ACCELERATE", "HARD_ACCELERATE", "SOFT_BREAK", "HARD_BREAK"
             if action == 0:
@@ -3585,6 +3587,7 @@ class CarRacingShared(CarRacing):
         else:
             AssertionError()
 
+        print("Env", self.pi_action)
         pi_action_steering = self._transform_action(self.pi_action)[0]
         # print("Env", self.pi_action)
 
