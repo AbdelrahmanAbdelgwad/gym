@@ -2273,47 +2273,6 @@ class CarRacing(gym.Env, EzPickle):
                 action = [-0.1 * action, 0, 0.0]
             if 11 <= action <= 20:
                 action = [0.1 * (action - 10), 0, 0.0]
-        
-            # if action == 1:
-            #     action = [-0.1, 0, 0.0]  # LEFT_LEVEL_1
-            # if action == 2:
-            #     action = [-0.2, 0, 0.0]  # LEFT_LEVEL_2
-            # if action == 3:
-            #     action = [-0.3, 0, 0.0]  # LEFT_LEVEL_3
-            # if action == 4:
-            #     action = [-0.4, 0, 0.0]  # LEFT_LEVEL_4
-            # if action == 5:
-            #     action = [-0.5, 0, 0.0]  # LEFT_LEVEL_5
-            # if action == 6:
-            #     action = [-0.6, 0,0.0] # LEFT_LEVEL_6
-            # if action == 7:
-            #     action = [-0.7, 0, 0.0] # LEFT_LEVEL_7 
-            # if action == 8:
-            #     action = [-0.8, 0, 0.0] # LEFT_LEVEL_8
-            # if action == 9:
-            #     action = [-0.9, 0, 0.0] # LEFT_LEVEL_9
-            # if action == 10:
-            #     action = [-1, 0, 0.0] # LEFT_LEVEL_10
-            # if action == 11:
-            #     action = [0.1, 0, 0.0]  # RIGHT_LEVEL_1
-            # if action == 12:    
-            #     action = [0.2, 0, 0.0]  # RIGHT_LEVEL_2
-            # if action == 13:        
-            #     action = [0.3, 0, 0.0] # RIGHT_LEVEL_3
-            # if action == 14:
-            #     action = [0.4, 0, 0.0] # RIGHT_LEVEL_4
-            # if action == 15:
-            #     action = [0.5, 0, 0.0]  # RIGHT_LEVEL_5
-            # if action == 16:
-            #     action = [0.6, 0, 0.0]  # RIGHT_LEVEL_6
-            # if action == 17:    
-            #     action = [0.7, 0, 0.0] # RIGHT_LEVEL_7
-            # if action == 18:        
-            #     action = [0.8, 0, 0.0] # RIGHT_LEVEL_8
-            # if action == 19:
-            #     action = [0.9, 0, 0.0] # RIGHT_LEVEL_9
-            # if action == 20:
-            #     action = [1, 0, 0.0] # RIGHT_LEVEL_10
             if action == 21:
                 action = [0, +0.5, 0.0]  # SOFT_ACCELERATE
             if action == 22:
