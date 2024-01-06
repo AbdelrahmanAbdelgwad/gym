@@ -567,6 +567,7 @@ class CarRacing(gym.Env, EzPickle):
             "SOFT_BREAK",
             "HARD_BREAK",
         )
+
         self.possible_smooth_steering_actions = (
             "NOTHING",
             "LEFT_LEVEL_1",
@@ -579,6 +580,57 @@ class CarRacing(gym.Env, EzPickle):
             "RIGHT_LEVEL_3",
             "RIGHT_LEVEL_4",
             "RIGHT_LEVEL_5",
+        )
+        self.possible_f_smooth_actions = (
+            "NOTHING",
+            "LEFT_LEVEL_1",
+            "LEFT_LEVEL_2",
+            "LEFT_LEVEL_3",
+            "LEFT_LEVEL_4",
+            "LEFT_LEVEL_5",
+            "LEFT_LEVEL_6",
+            "LEFT_LEVEL_7",
+            "LEFT_LEVEL_8",
+            "LEFT_LEVEL_9",
+            "LEFT_LEVEL_10",
+            "RIGHT_LEVEL_1",
+            "RIGHT_LEVEL_2",
+            "RIGHT_LEVEL_3",
+            "RIGHT_LEVEL_4",
+            "RIGHT_LEVEL_5",
+            "RIGHT_LEVEL_6",
+            "RIGHT_LEVEL_7",
+            "RIGHT_LEVEL_8",
+            "RIGHT_LEVEL_9",
+            "RIGHT_LEVEL_10",
+            "SOFT_ACCELERATE",
+            "HARD_ACCELERATE",
+            "SOFT_BREAK",
+            "HARD_BREAK",
+        )
+        
+        self.possible_f_smooth_steering_actions = (
+            "NOTHING",
+            "LEFT_LEVEL_1",
+            "LEFT_LEVEL_2",
+            "LEFT_LEVEL_3",
+            "LEFT_LEVEL_4",
+            "LEFT_LEVEL_5",
+            "LEFT_LEVEL_6",
+            "LEFT_LEVEL_7",
+            "LEFT_LEVEL_8",
+            "LEFT_LEVEL_9",
+            "LEFT_LEVEL_10",
+            "RIGHT_LEVEL_1",
+            "RIGHT_LEVEL_2",
+            "RIGHT_LEVEL_3",
+            "RIGHT_LEVEL_4",
+            "RIGHT_LEVEL_5",
+            "RIGHT_LEVEL_6",
+            "RIGHT_LEVEL_7",
+            "RIGHT_LEVEL_8",
+            "RIGHT_LEVEL_9",
+            "RIGHT_LEVEL_10",
         )
         self.possible_residual_steering_actions = (
             "NOTHING",
@@ -713,7 +765,7 @@ class CarRacing(gym.Env, EzPickle):
         self.discretize_actions = (
             discretize_actions
             if discretize_actions
-            in [None, "hard", "soft", "smooth", "smooth_steering", "residual_steering"]
+            in [None, "hard", "soft", "smooth", "smooth_steering","f_smooth","f_smooth_steering", "residual_steering"]
             else "hard"
         )
 
@@ -734,6 +786,12 @@ class CarRacing(gym.Env, EzPickle):
             )
         elif self.discretize_actions == "smooth":
             self.action_space = spaces.Discrete(len(self.possible_smooth_actions))
+        elif self.discretize_actions == "f_smooth":
+            self.action_space = spaces.Discrete(len(self.possible_f_smooth_actions))
+        elif self.discretize_actions == "f_smooth_steering":
+            self.action_space = spaces.Discrete(
+                len(self.possible_f_smooth_steering_actions)
+            )
         elif self.discretize_actions == "soft":
             self.action_space = spaces.Discrete(len(self.possible_soft_actions))
         elif self.discretize_actions == "hard":
@@ -2208,6 +2266,71 @@ class CarRacing(gym.Env, EzPickle):
             if action == 14:
                 action = [0, 0, 0.8]  # HARD_BREAK
 
+        if self.discretize_actions == "f_smooth":
+            if action == 0:
+                action = [0, 0, 0.0]  # "NOTHING"
+            if 1 <= action <= 10:
+                action = [-0.1 * action, 0, 0.0]
+            if 11 <= action <= 20:
+                action = [0.1 * (action - 10), 0, 0.0]
+        
+            # if action == 1:
+            #     action = [-0.1, 0, 0.0]  # LEFT_LEVEL_1
+            # if action == 2:
+            #     action = [-0.2, 0, 0.0]  # LEFT_LEVEL_2
+            # if action == 3:
+            #     action = [-0.3, 0, 0.0]  # LEFT_LEVEL_3
+            # if action == 4:
+            #     action = [-0.4, 0, 0.0]  # LEFT_LEVEL_4
+            # if action == 5:
+            #     action = [-0.5, 0, 0.0]  # LEFT_LEVEL_5
+            # if action == 6:
+            #     action = [-0.6, 0,0.0] # LEFT_LEVEL_6
+            # if action == 7:
+            #     action = [-0.7, 0, 0.0] # LEFT_LEVEL_7 
+            # if action == 8:
+            #     action = [-0.8, 0, 0.0] # LEFT_LEVEL_8
+            # if action == 9:
+            #     action = [-0.9, 0, 0.0] # LEFT_LEVEL_9
+            # if action == 10:
+            #     action = [-1, 0, 0.0] # LEFT_LEVEL_10
+            # if action == 11:
+            #     action = [0.1, 0, 0.0]  # RIGHT_LEVEL_1
+            # if action == 12:    
+            #     action = [0.2, 0, 0.0]  # RIGHT_LEVEL_2
+            # if action == 13:        
+            #     action = [0.3, 0, 0.0] # RIGHT_LEVEL_3
+            # if action == 14:
+            #     action = [0.4, 0, 0.0] # RIGHT_LEVEL_4
+            # if action == 15:
+            #     action = [0.5, 0, 0.0]  # RIGHT_LEVEL_5
+            # if action == 16:
+            #     action = [0.6, 0, 0.0]  # RIGHT_LEVEL_6
+            # if action == 17:    
+            #     action = [0.7, 0, 0.0] # RIGHT_LEVEL_7
+            # if action == 18:        
+            #     action = [0.8, 0, 0.0] # RIGHT_LEVEL_8
+            # if action == 19:
+            #     action = [0.9, 0, 0.0] # RIGHT_LEVEL_9
+            # if action == 20:
+            #     action = [1, 0, 0.0] # RIGHT_LEVEL_10
+            if action == 21:
+                action = [0, +0.5, 0.0]  # SOFT_ACCELERATE
+            if action == 22:
+                action = [0, +1, 0.0] # HARD_ACCELERATE
+            if action == 23:
+                action = [0, 0, 0.4] # SOFT_BREAK
+            if action == 24:
+                action = [0, 0, 0.8] # HARD_BREAK
+
+        if self.discretize_actions == "f_smooth_steering":
+            if action == 0:
+                action = [0, 0.3, 0.05]  # "NOTHING"
+            if 1 <= action <= 10:
+                action = [-0.1 * action, 0.3, 0.05] # LEFT_LEVEL_1_to_10
+            if 11 <= action <= 20:  
+                action = [0.1 * (action - 10), 0.3, 0.05] # RIGHT_LEVEL_1_to_10
+
         if self.discretize_actions == "soft":
             # "NOTHING", "SOFT_LEFT", "HARD_LEFT", "SOFT_RIGHT", "HARD_RIGHT",
             # "SOFT_ACCELERATE", "HARD_ACCELERATE", "SOFT_BREAK", "HARD_BREAK"
@@ -3047,6 +3170,19 @@ class CarRacingShared(CarRacing):
             self.Kp = Kp
             self.Ki = Ki
             self.Kd = Kd
+        elif self.pilot_type == "PID_noisy_pilot":
+            self.previous_error = 0
+            self.Kp = Kp
+            self.Ki = Ki
+            self.Kd = Kd
+            self.random_action_prob = random_action_prob
+        elif self.pilot_type == "PID_laggy_pilot":
+            self.previous_error = 0
+            self.Kp = Kp
+            self.Ki = Ki
+            self.Kd = Kd
+            self.laggy_pilot_freq = laggy_pilot_freq
+            self.laggy_pilot_counter = 0
         else:
             self.pilot = DQN.load(pilot)
 
@@ -3171,7 +3307,7 @@ class CarRacingShared(CarRacing):
         self.discretize_actions = (
             discretize_actions
             if discretize_actions
-            in [None, "hard", "soft", "smooth", "smooth_steering", "residual_steering"]
+            in [None, "hard", "soft", "smooth", "smooth_steering","f_smooth","f_smooth_steering", "residual_steering"]
             else "smooth_steering"
         )
 
@@ -3194,6 +3330,12 @@ class CarRacingShared(CarRacing):
             )
         elif self.discretize_actions == "smooth":
             self.action_space = spaces.Discrete(len(self.possible_smooth_actions))
+        elif self.discretize_actions == "f_smooth":
+            self.action_space = spaces.Discrete(len(self.possible_f_smooth_actions))
+        elif self.discretize_actions == "f_smooth_steering":
+            self.action_space = spaces.Discrete(
+                len(self.possible_f_smooth_steering_actions)
+            )
         elif self.discretize_actions == "soft":
             self.action_space = spaces.Discrete(len(self.possible_soft_actions))
         elif self.discretize_actions == "hard":
@@ -3340,6 +3482,24 @@ class CarRacingShared(CarRacing):
             steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
             self.pi_action = [steering, 0.3, 0.05]
             self.previous_error = error
+        elif self.pilot_type == "PID_noisy_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+            if np.random.random() < self.random_action_prob:
+                self.pi_action = self.action_space.sample()
+        elif self.pilot_type == "PID_laggy_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+            if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
+                self.pi_action = [steering, 0.3, 0.05]
+            self.laggy_pilot_counter += 1
+
         else:
             AssertionError()
 
@@ -3427,6 +3587,23 @@ class CarRacingShared(CarRacing):
             steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
             self.pi_action = [steering, 0.3, 0.05]
             self.previous_error = error
+        elif self.pilot_type == "PID_noisy_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+            if np.random.random() < self.random_action_prob:
+                self.pi_action = self.action_space.sample()
+        elif self.pilot_type == "PID_laggy_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+            if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
+                self.pi_action = [steering, 0.3, 0.05]
+            self.laggy_pilot_counter += 1
         else:
             AssertionError()
 
