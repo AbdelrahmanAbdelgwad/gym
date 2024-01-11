@@ -1,4 +1,3 @@
-# Comment for commit
 import pickle
 import os
 import sys, math
@@ -20,13 +19,20 @@ from Box2D.b2 import (
 )
 from PIL import Image
 
-import gym
+import gym as gym
 from gym import spaces
 from gym.envs.box2d.car_dynamics import Car
 from gym.utils import colorize, seeding, EzPickle
 
 import pyglet
 from pyglet import gl
+
+import matplotlib.pyplot as plt
+import cv2
+
+from stable_baselines3 import DQN
+
+# from pynput import keyboard
 
 # Easiest continuous control task to learn from pixels, a top-down racing environment.
 # Discreet control is reasonable in this environment as well, on/off discretisation is
@@ -117,6 +123,8 @@ FORBID_HARD_TURNS_IN_INTERSECTIONS = False
 
 
 def key_press_example(k, mod):
+    from pyglet.window import key
+
     """
     Example callback function
     """
@@ -126,6 +134,8 @@ def key_press_example(k, mod):
 
 
 def key_release_example(k, mod):
+    from pyglet.window import key
+
     """
     Example callback function
     """
@@ -228,6 +238,114 @@ def default_reward_callback(env):
             reward -= HARD_NEG_REWARD
 
     return reward, full_reward, done
+
+
+def map_val(
+    input: float,
+    input_min: float,
+    input_max: float,
+    output_min: float,
+    output_max: float,
+) -> float:
+    output = (
+        ((input - input_min) / (input_max - input_min)) * (output_max - output_min)
+    ) + output_min
+    return output
+
+
+def steering2action(action):
+    tolerance = 0.01  # Adjust this tolerance as needed
+
+    if abs(action - 0) <= tolerance:
+        action = 0  # "NOTHING"
+    elif abs(action - (-0.2)) <= tolerance:
+        action = 1  # LEFT_LEVEL_1
+    elif abs(action - (-0.4)) <= tolerance:
+        action = 2  # LEFT_LEVEL_2
+    elif abs(action - (-0.6)) <= tolerance:
+        action = 3  # LEFT_LEVEL_3
+    elif abs(action - (-0.8)) <= tolerance:
+        action = 4  # LEFT_LEVEL_4
+    elif abs(action - (-1)) <= tolerance:
+        action = 5  # LEFT_LEVEL_5
+    elif abs(action - 0.2) <= tolerance:
+        action = 6  # RIGHT_LEVEL_1
+    elif abs(action - 0.4) <= tolerance:
+        action = 7  # RIGHT_LEVEL_2
+    elif abs(action - 0.6) <= tolerance:
+        action = 8  # RIGHT_LEVEL_3
+    elif abs(action - 0.8) <= tolerance:
+        action = 9  # RIGHT_LEVEL_4
+    elif abs(action - 1) <= tolerance:
+        action = 10  # RIGHT_LEVEL_5
+    return action
+
+
+def find_error(observation, previous_error):
+    print("find_error", observation.shape)
+
+    def green_mask(observation):
+        hsv = cv2.cvtColor(observation, cv2.COLOR_BGR2HSV)
+        mask_green = cv2.inRange(hsv, (36, 25, 25), (70, 255, 255))
+
+        ## slice the green
+        imask_green = mask_green > 0
+        green = np.zeros_like(observation, np.uint8)
+        green[imask_green] = observation[imask_green]
+        return green
+
+    def gray_scale(observation):
+        gray = cv2.cvtColor(observation, cv2.COLOR_RGB2GRAY)
+        return gray
+
+    def blur_image(observation):
+        blur = cv2.GaussianBlur(observation, (5, 5), 0)
+        return blur
+
+    def canny_edge_detector(observation):
+        canny = cv2.Canny(observation, 50, 150)
+        return canny
+
+    cropped = observation[63:65, 24:73]
+
+    green = green_mask(cropped)
+    grey = gray_scale(green)
+    blur = blur_image(grey)
+    canny = canny_edge_detector(blur)
+
+    # find all non zero values in the cropped strip.
+    # These non zero points(white pixels) corresponds to the edges of the road
+    nz = cv2.findNonZero(canny)
+    if nz is None:
+        return previous_error
+
+    # horizontal cordinates of center of the road in the cropped slice
+    mid = 24
+
+    # some further adjustments obtained through trail and error
+    if nz[:, 0, 0].max() == nz[:, 0, 0].min():
+        if nz[:, 0, 0].max() < 30 and nz[:, 0, 0].max() > 20:
+            return previous_error
+        if nz[:, 0, 0].max() >= mid:
+            return -15
+        else:
+            return +15
+    else:
+        return ((nz[:, 0, 0].max() + nz[:, 0, 0].min()) / 2) - mid
+
+
+def pid(error, previous_error, Kp, Ki, Kd):
+    steering = (
+        Kp * error + Ki * (error + previous_error) + Kd * (error - previous_error)
+    )
+
+    return steering
+
+
+def reshape_state_for_nvidia(state):
+    res = cv2.resize(state, dsize=(66, 200), interpolation=cv2.INTER_CUBIC)
+    resized_state = np.array(res)
+    return resized_state
 
 
 class FrictionDetector(contactListener):
@@ -348,6 +466,18 @@ class CarRacing(gym.Env, EzPickle):
                                      - "soft" actions are 7 [NOTHING, SOFT_LEFT, HARD_LEFT, SOFT_RIGHT,
                                      HARD_RIGHT, SOFT_STRAIGHT, HARD_STRAIGHT, SOFT_BREAK,
                                      HARD_BREAK]
+                                     - "smooth" actions are 15 [NOTHING, LEFT_LEVEL_1, LEFT_LEVEL_2,
+                                     LEFT_LEVEL_3, LEFT_LEVEL_4, LEFT_LEVEL_5, RIGHT_LEVEL_1 , RIGHT_LEVEL_2,
+                                     RIGHT_LEVEL_3, RIGHT_LEVEL_4, RIGHT_LEVEL_5, SOFT_ACCELERATE,
+                                     HARD_ACCELERATE, SOFT_BREAK, HARD_BREAK]
+                                     - "smooth_steering" actions are 11 [NOTHING, LEFT_LEVEL_1, LEFT_LEVEL_2,
+                                     LEFT_LEVEL_3, LEFT_LEVEL_4, LEFT_LEVEL_5, RIGHT_LEVEL_1 , RIGHT_LEVEL_2,
+                                     RIGHT_LEVEL_3, RIGHT_LEVEL_4, RIGHT_LEVEL_5]
+                                     - "residual_steering" actions are 11 [NOTHING, LEFT_ADJUSTMENT_LEVEL_1,
+                                        LEFT_ADJUSTMENT_LEVEL_2, LEFT_ADJUSTMENT_LEVEL_3, LEFT_ADJUSTMENT_LEVEL_4,
+                                        LEFT_ADJUSTMENT_LEVEL_5, RIGHT_ADJUSTMENT_LEVEL_1 , RIGHT_ADJUSTMENT_LEVEL_2,
+                                        RIGHT_ADJUSTMENT_LEVEL_3, RIGHT_ADJUSTMENT_LEVEL_4, RIGHT_ADJUSTMENT_LEVEL_5]
+                                     Notice that all actions here are on same gas level
 
     min_step_reward (flt -inf)    To limit the min reward the agent can have in an episode, -np.inf means no limit
                                      it is good to control the gradient
@@ -425,15 +555,122 @@ class CarRacing(gym.Env, EzPickle):
             "HARD_ACCELERATE",
             "SOFT_BREAK",
             "HARD_BREAK",
-        )  # Not implemented
+        )
+        self.possible_smooth_actions = (
+            "NOTHING",
+            "LEFT_LEVEL_1",
+            "LEFT_LEVEL_2",
+            "LEFT_LEVEL_3",
+            "LEFT_LEVEL_4",
+            "LEFT_LEVEL_5",
+            "RIGHT_LEVEL_1",
+            "RIGHT_LEVEL_2",
+            "RIGHT_LEVEL_3",
+            "RIGHT_LEVEL_4",
+            "RIGHT_LEVEL_5",
+            "SOFT_ACCELERATE",
+            "HARD_ACCELERATE",
+            "SOFT_BREAK",
+            "HARD_BREAK",
+        )
+
+        self.possible_smooth_steering_actions = (
+            "NOTHING",
+            "LEFT_LEVEL_1",
+            "LEFT_LEVEL_2",
+            "LEFT_LEVEL_3",
+            "LEFT_LEVEL_4",
+            "LEFT_LEVEL_5",
+            "RIGHT_LEVEL_1",
+            "RIGHT_LEVEL_2",
+            "RIGHT_LEVEL_3",
+            "RIGHT_LEVEL_4",
+            "RIGHT_LEVEL_5",
+        )
+        self.possible_f_smooth_actions = (
+            "NOTHING",
+            "LEFT_LEVEL_1",
+            "LEFT_LEVEL_2",
+            "LEFT_LEVEL_3",
+            "LEFT_LEVEL_4",
+            "LEFT_LEVEL_5",
+            "LEFT_LEVEL_6",
+            "LEFT_LEVEL_7",
+            "LEFT_LEVEL_8",
+            "LEFT_LEVEL_9",
+            "LEFT_LEVEL_10",
+            "RIGHT_LEVEL_1",
+            "RIGHT_LEVEL_2",
+            "RIGHT_LEVEL_3",
+            "RIGHT_LEVEL_4",
+            "RIGHT_LEVEL_5",
+            "RIGHT_LEVEL_6",
+            "RIGHT_LEVEL_7",
+            "RIGHT_LEVEL_8",
+            "RIGHT_LEVEL_9",
+            "RIGHT_LEVEL_10",
+            "SOFT_ACCELERATE",
+            "HARD_ACCELERATE",
+            "SOFT_BREAK",
+            "HARD_BREAK",
+        )
+
+        self.possible_f_smooth_steering_actions = (
+            "NOTHING",
+            "LEFT_LEVEL_1",
+            "LEFT_LEVEL_2",
+            "LEFT_LEVEL_3",
+            "LEFT_LEVEL_4",
+            "LEFT_LEVEL_5",
+            "LEFT_LEVEL_6",
+            "LEFT_LEVEL_7",
+            "LEFT_LEVEL_8",
+            "LEFT_LEVEL_9",
+            "LEFT_LEVEL_10",
+            "RIGHT_LEVEL_1",
+            "RIGHT_LEVEL_2",
+            "RIGHT_LEVEL_3",
+            "RIGHT_LEVEL_4",
+            "RIGHT_LEVEL_5",
+            "RIGHT_LEVEL_6",
+            "RIGHT_LEVEL_7",
+            "RIGHT_LEVEL_8",
+            "RIGHT_LEVEL_9",
+            "RIGHT_LEVEL_10",
+        )
+        self.possible_residual_steering_actions = (
+            "NOTHING",
+            "LEFT_ADJUSTMENT_LEVEL_1",
+            "LEFT_ADJUSTMENT_LEVEL_2",
+            "LEFT_ADJUSTMENT_LEVEL_3",
+            "LEFT_ADJUSTMENT_LEVEL_4",
+            "LEFT_ADJUSTMENT_LEVEL_5",
+            "RIGHT_ADJUSTMENT_LEVEL_1",
+            "RIGHT_ADJUSTMENT_LEVEL_2",
+            "RIGHT_ADJUSTMENT_LEVEL_3",
+            "RIGHT_ADJUSTMENT_LEVEL_4",
+            "RIGHT_ADJUSTMENT_LEVEL_5",
+        )
         self.fd_tile = fixtureDef(
             shape=polygonShape(vertices=[(0, 0), (1, 0), (1, -1), (0, -1)])
         )
-
+        self.total_reward = 0
+        self.statistics = pd.DataFrame(
+            columns=[
+                "total_steps",
+                "episode_steps",
+                "scenario",
+                "total_reward",
+                "episode_reward",
+                "reward",
+            ]
+        )
         # Config
         self._set_config(**kwargs)
         self._org_config = deepcopy(kwargs)
         self._steps_in_episode = 0
+        self.human_keyboard_input = 0
+        self.total_timesteps = 0
 
     def _set_config(
         self,
@@ -460,7 +697,11 @@ class CarRacing(gym.Env, EzPickle):
         auto_render=False,
         allow_outside=True,
         load_tracks_from=None,
+        display=None,
+        scenario="train",
+        nvidia=False,
     ):
+        self.nvidia = nvidia
         self.allow_outside = allow_outside
         self.auto_render = auto_render
         self.reward_fn = reward_fn
@@ -468,7 +709,8 @@ class CarRacing(gym.Env, EzPickle):
         self.random_obstacle_x_position = random_obstacle_x_position
         self.verbose = verbose
         self.animate_zoom = animate_zoom
-
+        self.display = display
+        self.scenario = scenario
         if load_tracks_from is not None:
             if os.path.isdir(load_tracks_from):
                 self.load_tracks_from = load_tracks_from
@@ -508,7 +750,10 @@ class CarRacing(gym.Env, EzPickle):
 
         # Grayscale
         self.grayscale = grayscale
-        state_shape = [STATE_H, STATE_W]
+        if self.nvidia:
+            state_shape = [66, 200]
+        else:
+            state_shape = [STATE_H, STATE_W]
         if not self.grayscale:
             state_shape.append(3)
             if frames_per_state > 1:
@@ -528,9 +773,20 @@ class CarRacing(gym.Env, EzPickle):
             lst = list(range(self.frames_per_state))
             self._update_index = [lst[-1]] + lst[:-1]
 
-        # not including "soft" because it is not implemented yet
         self.discretize_actions = (
-            discretize_actions if discretize_actions in [None, "hard"] else "hard"
+            discretize_actions
+            if discretize_actions
+            in [
+                None,
+                "hard",
+                "soft",
+                "smooth",
+                "smooth_steering",
+                "f_smooth",
+                "f_smooth_steering",
+                "residual_steering",
+            ]
+            else "hard"
         )
 
         if max_step_reward < min_step_reward:
@@ -540,7 +796,23 @@ class CarRacing(gym.Env, EzPickle):
 
         state_shape = tuple(state_shape)
         # Incorporating reverse now the np.array([-1,0,0]) becomes np.array[-1,-1,0]
-        if self.discretize_actions == "soft":
+        if self.discretize_actions == "residual_steering":
+            self.action_space = spaces.Discrete(
+                len(self.possible_residual_steering_actions)
+            )
+        if self.discretize_actions == "smooth_steering":
+            self.action_space = spaces.Discrete(
+                len(self.possible_smooth_steering_actions)
+            )
+        elif self.discretize_actions == "smooth":
+            self.action_space = spaces.Discrete(len(self.possible_smooth_actions))
+        elif self.discretize_actions == "f_smooth":
+            self.action_space = spaces.Discrete(len(self.possible_f_smooth_actions))
+        elif self.discretize_actions == "f_smooth_steering":
+            self.action_space = spaces.Discrete(
+                len(self.possible_f_smooth_steering_actions)
+            )
+        elif self.discretize_actions == "soft":
             self.action_space = spaces.Discrete(len(self.possible_soft_actions))
         elif self.discretize_actions == "hard":
             self.action_space = spaces.Discrete(len(self.possible_hard_actions))
@@ -1521,9 +1793,13 @@ class CarRacing(gym.Env, EzPickle):
                 n += 1
         self.tracks[0] = np.delete(self.tracks[0], list(to_remove), axis=0)
 
+        # if len(self.tracks[1]) < 5:
+        #     self.tracks[1] = np.delete(
+        #         self.tracks[1], range(len(self.tracks[1])), axis=1
+        #     )
         if len(self.tracks[1]) < 5:
             self.tracks[1] = np.delete(
-                self.tracks[1], range(len(self.tracks[1])), axis=1
+                self.tracks[1], np.arange(len(self.tracks[1])), axis=0
             )
 
     def _choice_random_track_from_file(self):
@@ -1924,8 +2200,143 @@ class CarRacing(gym.Env, EzPickle):
             self.state = new_frame
 
     def _transform_action(self, action):
-        if self.discretize_actions == "soft":
-            raise NotImplementedError
+        try:
+            if len(action) > 1:
+                return action
+        except:
+            if action == None:
+                return action
+        if self.discretize_actions == "residual_steering":
+            if action == 0:
+                action = [0, 0.3, 0.05]
+            if action == 1:
+                action = [-0.01, 0.3, 0.05]
+            if action == 2:
+                action = [-0.05, 0.3, 0.05]
+            if action == 3:
+                action = [-0.1, 0.3, 0.05]
+            if action == 4:
+                action = [-0.2, 0.3, 0.05]
+            if action == 5:
+                action = [-0.25, 0.3, 0.05]
+            if action == 6:
+                action = [0.01, 0.3, 0.05]
+            if action == 7:
+                action = [0.05, 0.3, 0.05]
+            if action == 8:
+                action = [0.1, 0.3, 0.05]
+            if action == 9:
+                action = [0.2, 0.3, 0.05]
+            if action == 10:
+                action = [0.25, 0.3, 0.05]
+        elif self.discretize_actions == "smooth_steering":
+            # "NOTHING", LEFT_LEVEL_1, LEFT_LEVEL_2, LEFT_LEVEL_3, LEFT_LEVEL_4,
+            # LEFT_LEVEL_5, RIGHT_LEVEL_1 , RIGHT_LEVEL_2, RIGHT_LEVEL_3, RIGHT_LEVEL_4,
+            # RIGHT_LEVEL_5
+            # All actions are at 0.6 gas
+            # Agent is only required to steer properly
+            if action == 0:
+                action = [0, 0.3, 0.05]  # "NOTHING"
+            if action == 1:
+                action = [-0.2, 0.3, 0.05]  # LEFT_LEVEL_1
+            if action == 2:
+                action = [-0.4, 0.3, 0.05]  # LEFT_LEVEL_2
+            if action == 3:
+                action = [-0.6, 0.3, 0.05]  # LEFT_LEVEL_3
+            if action == 4:
+                action = [-0.8, 0.3, 0.05]  # LEFT_LEVEL_4
+            if action == 5:
+                action = [-1, 0.3, 0.05]  # LEFT_LEVEL_5
+            if action == 6:
+                action = [0.2, 0.3, 0.05]  # RIGHT_LEVEL_1
+            if action == 7:
+                action = [0.4, 0.3, 0.05]  # RIGHT_LEVEL_2
+            if action == 8:
+                action = [0.6, 0.3, 0.05]  # RIGHT_LEVEL_3
+            if action == 9:
+                action = [0.8, 0.3, 0.05]  # RIGHT_LEVEL_4
+            if action == 10:
+                action = [1, 0.3, 0.05]  # RIGHT_LEVEL_5
+        elif self.discretize_actions == "smooth":
+            # "NOTHING", # LEFT_LEVEL_1, # LEFT_LEVEL_2, # LEFT_LEVEL_3, # LEFT_LEVEL_4,
+            # # LEFT_LEVEL_5, RIGHT_LEVEL_1 , # RIGHT_LEVEL_2, # RIGHT_LEVEL_3, # RIGHT_LEVEL_4,
+            # # RIGHT_LEVEL_5, "SOFT_ACCELERATE", "HARD_ACCELERATE", "SOFT_BREAK", "HARD_BREAK"
+            if action == 0:
+                action = [0, 0, 0.0]  # "NOTHING"
+            if action == 1:
+                action = [-0.2, 0, 0.0]  # LEFT_LEVEL_1
+            if action == 2:
+                action = [-0.4, 0, 0.0]  # LEFT_LEVEL_2
+            if action == 3:
+                action = [-0.6, 0, 0.0]  # LEFT_LEVEL_3
+            if action == 4:
+                action = [-0.8, 0, 0.0]  # LEFT_LEVEL_4
+            if action == 5:
+                action = [-1, 0, 0.0]  # LEFT_LEVEL_5
+            if action == 6:
+                action = [0.2, 0, 0.0]  # RIGHT_LEVEL_1
+            if action == 7:
+                action = [0.4, 0, 0.0]  # RIGHT_LEVEL_2
+            if action == 8:
+                action = [0.6, 0, 0.0]  # RIGHT_LEVEL_3
+            if action == 9:
+                action = [0.8, 0, 0.0]  # RIGHT_LEVEL_4
+            if action == 10:
+                action = [1, 0, 0.0]  # RIGHT_LEVEL_5
+            if action == 11:
+                action = [0, +0.5, 0.0]  # SOFT_ACCELERATE
+            if action == 12:
+                action = [0, +1, 0.0]  # HARD_ACCELERATE
+            if action == 13:
+                action = [0, 0, 0.4]  # SOFT_BREAK
+            if action == 14:
+                action = [0, 0, 0.8]  # HARD_BREAK
+
+        elif self.discretize_actions == "f_smooth":
+            if action == 0:
+                action = [0, 0, 0.0]  # "NOTHING"
+            elif 1 <= action <= 10:
+                action = [-0.1 * action, 0, 0.0]
+            elif 11 <= action <= 20:
+                action = [0.1 * (action - 10), 0, 0.0]
+            elif action == 21:
+                action = [0, +0.5, 0.0]  # SOFT_ACCELERATE
+            elif action == 22:
+                action = [0, +1, 0.0]  # HARD_ACCELERATE
+            elif action == 23:
+                action = [0, 0, 0.4]  # SOFT_BREAK
+            elif action == 24:
+                action = [0, 0, 0.8]  # HARD_BREAK
+
+        elif self.discretize_actions == "f_smooth_steering":
+            if action == 0:
+                action = [0, 0.3, 0.05]  # "NOTHING"
+            elif 1 <= action <= 10:
+                action = [-0.1 * action, 0.3, 0.05]  # LEFT_LEVEL_1_to_10
+            elif 11 <= action <= 20:
+                action = [0.1 * (action - 10), 0.3, 0.05]  # RIGHT_LEVEL_1_to_10
+
+        elif self.discretize_actions == "soft":
+            # "NOTHING", "SOFT_LEFT", "HARD_LEFT", "SOFT_RIGHT", "HARD_RIGHT",
+            # "SOFT_ACCELERATE", "HARD_ACCELERATE", "SOFT_BREAK", "HARD_BREAK"
+            if action == 0:
+                action = [0, 0, 0.0]  # NOTHING
+            if action == 1:
+                action = [-0.5, 0, 0.0]  # SOFT_LEFT
+            if action == 2:
+                action = [-1, 0, 0.0]  # HARD_LEFT
+            if action == 3:
+                action = [+0.5, 0, 0.0]  # SOFT_RIGHT
+            if action == 4:
+                action = [+1, 0, 0.0]  # HARD_RIGHT
+            if action == 5:
+                action = [0, +0.5, 0.0]  # SOFT_ACCELERATE
+            if action == 6:
+                action = [0, +1, 0.0]  # HARD_ACCELERATE
+            if action == 7:
+                action = [0, 0, 0.4]  # SOFT_BREAK
+            if action == 8:
+                action = [0, 0, 0.8]  # HARD_BREAK
         elif self.discretize_actions == "hard":
             # ("NOTHING", "LEFT", "RIGHT", "ACCELERATE", "BREAK")
             # angle, gas, break
@@ -1943,6 +2354,8 @@ class CarRacing(gym.Env, EzPickle):
         return action
 
     def step(self, action):
+        self.total_reward += 1
+        self.total_timesteps += 1
         action = self._transform_action(action)
 
         if action is not None:
@@ -1956,7 +2369,7 @@ class CarRacing(gym.Env, EzPickle):
         self.t += 1.0 / FPS
 
         # self.state = self.render("state_pixels") # Old code, only one frame
-        self._update_state(self.render("state_pixels"))
+        self._update_state(self.render("state_pixels")[0])
 
         step_reward = 0
         full_step_reward = 0
@@ -1969,9 +2382,19 @@ class CarRacing(gym.Env, EzPickle):
         self.reward += step_reward
         self.full_reward += full_step_reward
 
+        self.statistics.loc[len(self.statistics)] = [  # type: ignore
+            self.total_timesteps,
+            self._steps_in_episode,
+            "robot_env_" + self.scenario,
+            self.total_reward,
+            self._steps_in_episode,
+            self.full_reward,
+        ]
+
         if self.auto_render:
             self.render()
-
+        if self.nvidia:
+            self.state = reshape_state_for_nvidia(self.state)
         return self.state, step_reward, done, {}
 
     def _render_additional_objects(self):
@@ -1986,7 +2409,7 @@ class CarRacing(gym.Env, EzPickle):
         if self.viewer is None:
             from gym.envs.classic_control import rendering
 
-            self.viewer = rendering.Viewer(WINDOW_W, WINDOW_H)
+            self.viewer = rendering.Viewer(WINDOW_W, WINDOW_H, caption=self.display)
             self.score_label = pyglet.text.Label(
                 "Score: 0000",
                 font_size=20,
@@ -2102,6 +2525,7 @@ class CarRacing(gym.Env, EzPickle):
             arr = np.fromstring(image_data.data, dtype=np.uint8, sep="")
             arr = arr.reshape(VP_H, VP_W, 4)
             arr = arr[::-1, :, 0:3]
+            rgb_array = arr
             if self.grayscale and mode != "rgb_array":
                 arr_bw = np.dot(arr[..., :3], [0.299, 0.587, 0.114])
                 arr = arr_bw
@@ -2124,9 +2548,11 @@ class CarRacing(gym.Env, EzPickle):
             self.render_indicators(WINDOW_W, WINDOW_H)
             self._render_additional_objects()
             win.flip()
+            arr = None
+            rgb_array = None
 
         self.viewer.onetime_geoms = []
-        return arr
+        return arr, rgb_array
 
     def _key_press(self, k, mod):
         from pyglet.window import key
@@ -2135,6 +2561,14 @@ class CarRacing(gym.Env, EzPickle):
             self.auto_render = not self.auto_render
         if k == key.T:  # T from Take screnshot
             self.screenshot()
+        if k == key.RIGHT:
+            self.human_keyboard_input += 0.2
+            self.human_keyboard_input = min(self.human_keyboard_input, 1)
+        if k == key.LEFT:
+            self.human_keyboard_input += -0.2
+            self.human_keyboard_input = max(self.human_keyboard_input, -1)
+        if k == key.UP:
+            self.human_keyboard_input = 0
 
         if self.key_press_fn is not None:
             self.key_press_fn(k, mod)
@@ -2156,7 +2590,7 @@ class CarRacing(gym.Env, EzPickle):
             state = self.render("HD")
         if state is not None:
             for f in range(self.frames_per_state):
-                if self.frames_per_state == 1 or quality is not "low":
+                if self.frames_per_state == 1 or quality != "low":
                     frame_str = ""
                     frame = state
                 else:
@@ -2700,6 +3134,504 @@ class CarRacing(gym.Env, EzPickle):
     # if self.viewer is not None:
     # if self.key_release_fn is not None:
     # self.viewer.window.on_key_release = self.key_release_fn
+
+
+class CarRacingShared(CarRacing):
+    def __init__(
+        self,
+        pilot: str,
+        pilot_type: str,
+        random_action_prob: float,
+        laggy_pilot_freq: int,
+        Kp: float = 0.03,
+        Ki: float = 0.01,
+        Kd: float = 0.1,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.pilot_type = pilot_type
+
+        if self.pilot_type == "PID_pilot":
+            self.previous_error = 0
+            self.Kp = Kp
+            self.Ki = Ki
+            self.Kd = Kd
+        elif self.pilot_type == "PID_noisy_pilot":
+            self.previous_error = 0
+            self.Kp = Kp
+            self.Ki = Ki
+            self.Kd = Kd
+            self.random_action_prob = random_action_prob
+        elif self.pilot_type == "PID_laggy_pilot":
+            self.previous_error = 0
+            self.Kp = Kp
+            self.Ki = Ki
+            self.Kd = Kd
+            self.laggy_pilot_freq = laggy_pilot_freq
+            self.laggy_pilot_counter = 0
+        else:
+            self.pilot = DQN.load(pilot)
+
+        if self.pilot_type == "noisy_pilot":
+            self.random_action_prob = random_action_prob
+        else:
+            pass
+
+        if self.pilot_type == "laggy_pilot":
+            self.laggy_pilot_freq = laggy_pilot_freq
+            self.laggy_pilot_counter = 0
+        else:
+            pass
+
+        self.pi_action = 0
+        self.total_timesteps = 0
+
+    def _set_config(
+        self,
+        num_tracks=1,
+        num_lanes=1,
+        num_lanes_changes=0,
+        num_obstacles=0,
+        max_single_lane=0,
+        max_time_out=2.0,
+        grayscale=False,
+        show_info_panel=False,
+        frames_per_state=1,
+        discretize_actions="smooth_steering",
+        allow_reverse=0,
+        min_step_reward=-np.inf,
+        max_step_reward=+np.inf,
+        animate_zoom=False,
+        reward_fn=default_reward_callback,
+        key_press_fn=None,
+        key_release_fn=None,
+        verbose=1,
+        random_obstacle_x_position=True,
+        random_obstacle_shape=True,
+        auto_render=False,
+        allow_outside=True,
+        load_tracks_from=None,
+        display=None,
+        obs_space="frames",
+        scenario="train",
+    ):
+        self.allow_outside = allow_outside
+        self.auto_render = auto_render
+        self.reward_fn = reward_fn
+        self.random_obstacle_shape = random_obstacle_shape
+        self.random_obstacle_x_position = random_obstacle_x_position
+        self.verbose = verbose
+        self.animate_zoom = animate_zoom
+        self.display = display
+        self.obs_space = obs_space
+        self.scenario = scenario
+
+        if load_tracks_from is not None:
+            if os.path.isdir(load_tracks_from):
+                self.load_tracks_from = load_tracks_from
+                self.tracks_df = pd.read_csv(
+                    self.load_tracks_from + "/list.csv", index_col=0
+                )
+            else:
+                raise Exception("Folder specified in load_tracks_from does not exists")
+        else:
+            self.load_tracks_from = None
+
+        # Setting key press callback functions
+        self.key_press_fn = key_press_fn
+        self.key_release_fn = key_release_fn
+
+        # Number of lanes, 1 or 2
+        self.num_lanes = num_lanes if num_lanes in [1, 2] else 1
+
+        # Number of tracks, this control the complexity of the map
+        self.num_tracks = num_tracks if num_tracks > 0 and num_tracks <= 2 else 1
+
+        # Number of obstacles in the track
+        self.num_obstacles = num_obstacles if num_obstacles >= 0 else 0
+
+        # Number of points where lanes change from 1 lane to two and viceversa
+        self.num_lanes_changes = num_lanes_changes if num_lanes_changes >= 0 else 0
+
+        # Max number of tiles of a single lane road
+        self.max_single_lane = max_single_lane if max_single_lane > 10 else 50
+
+        # Allow reverse
+        self.allow_reverse = allow_reverse
+        min_speed = -1 if self.allow_reverse else 0
+
+        # Max time out of track
+        self.max_time_out = max_time_out if max_time_out >= 0 else 2.0
+
+        # Grayscale or RGB
+        # If the state is RGB then force the frames_per_state to be 1
+        # because there is no support for several frames in RGB
+        # state_shape = [STATE_H, STATE_W, 3]
+        self.grayscale = grayscale
+        state_shape = [STATE_H, STATE_W]
+        if not self.grayscale:
+            state_shape.append(3)
+            if frames_per_state > 1:
+                print("####################################")
+                print("Warning: making frames_per_state = 1")
+                print("No support for several frames in RGB")
+                frames_per_state = 1
+
+        # Show or not back bottom info panel
+        self.show_info_panel = show_info_panel
+
+        # If frames_per_state > 1 then the mode must be grayscale and not RGB
+        # state_shape = [STATE_H, STATE_W, frames_per_state]
+        self.frames_per_state = frames_per_state if frames_per_state > 0 else 1
+
+        if self.frames_per_state > 1:
+            state_shape.append(self.frames_per_state)
+
+            lst = list(range(self.frames_per_state))
+            self._update_index = [lst[-1]] + lst[:-1]
+
+        self.discretize_actions = (
+            discretize_actions
+            if discretize_actions
+            in [
+                None,
+                "hard",
+                "soft",
+                "smooth",
+                "smooth_steering",
+                "f_smooth",
+                "f_smooth_steering",
+                "residual_steering",
+            ]
+            else "smooth_steering"
+        )
+
+        if max_step_reward < min_step_reward:
+            raise AttributeError("max_step_reward must be greater than min_step_reward")
+        self.max_step_reward = max_step_reward
+        self.min_step_reward = min_step_reward
+
+        state_shape = list(state_shape)
+        state_shape[-1] += 1
+
+        # Incorporating reverse now the np.array([-1,0,0]) becomes np.array[-1,-1,0]
+        if self.discretize_actions == "residual_steering":
+            self.action_space = spaces.Discrete(
+                len(self.possible_residual_steering_actions)
+            )
+        if self.discretize_actions == "smooth_steering":
+            self.action_space = spaces.Discrete(
+                len(self.possible_smooth_steering_actions)
+            )
+        elif self.discretize_actions == "smooth":
+            self.action_space = spaces.Discrete(len(self.possible_smooth_actions))
+        elif self.discretize_actions == "f_smooth":
+            self.action_space = spaces.Discrete(len(self.possible_f_smooth_actions))
+        elif self.discretize_actions == "f_smooth_steering":
+            self.action_space = spaces.Discrete(
+                len(self.possible_f_smooth_steering_actions)
+            )
+        elif self.discretize_actions == "soft":
+            self.action_space = spaces.Discrete(len(self.possible_soft_actions))
+        elif self.discretize_actions == "hard":
+            self.action_space = spaces.Discrete(len(self.possible_hard_actions))
+        else:
+            self.action_space = spaces.Box(
+                np.array([-1, min_speed, 0]), np.array([+1, +1, +1]), dtype=np.float32
+            )  # steer, gas, brake
+
+        if self.obs_space == "dict":
+            self.observation_space = spaces.Dict(
+                {
+                    "frames": spaces.Box(
+                        low=0,
+                        high=255,
+                        shape=(STATE_H, STATE_W, self.frames_per_state)
+                        if self.grayscale
+                        else (STATE_H, STATE_W, 3),
+                        dtype=np.uint8,
+                    ),
+                    "human_action": spaces.Box(
+                        low=-1, high=1, shape=(1,), dtype=np.float32
+                    ),
+                }
+            )
+        elif self.obs_space == "frames":
+            self.observation_space = spaces.Box(
+                low=0,
+                high=255,
+                shape=(STATE_H, STATE_W, self.frames_per_state + 1)
+                if self.grayscale
+                else (STATE_H, STATE_W, 4),
+                dtype=np.uint8,
+            )
+        elif self.obs_space == "vector":
+            self.observation_space = spaces.Box(
+                low=-100, high=100, shape=(2,), dtype=np.float32
+            )
+            self.previous_error = 0
+
+        # Set custom reward function
+        self.contactListener_keepref = FrictionDetector(self)
+        self.world = Box2D.b2World((0, 0), contactListener=self.contactListener_keepref)
+
+    # def _update_state(self, new_frame):
+    #     if self.obs_space == "dict":
+    #         if self.frames_per_state > 1:
+    #             self.state["frames"][:, :, -1] = new_frame
+    #             self.state["frames"] = self.state["frames"][:, :, self._update_index]
+    #         else:
+    #             self.state["frames"] = new_frame
+    #     elif self.obs_space == "frames":
+    #         if self.frames_per_state > 1:
+    #             self.state[:, :, -1] = new_frame
+    #             self.state = self.state[:, :, self._update_index]
+    #         else:
+    #             self.state = new_frame
+
+    def reset(self):
+        """
+        car_position [angle float, x float, y float]
+                     Position of the car
+                     Default: first tile of principal track
+        """
+        self._destroy()
+        self.reward = 0.0
+        self.full_reward = 0.0
+        self.highest_reward = 0.0
+        self.last_touch_with_track = 0.0
+        self.prev_reward = 0.0
+        self.tile_visited_count = 0
+        self.t = 0.0
+        self._current_nodes = {}
+        self._next_nodes = []
+        self.road_poly = []
+        self.border_poly = []
+        self.obstacles_poly = []
+        self.track = []
+        self.tracks = []
+        self.info = []
+        self.road = []
+        self.track_lanes = None
+        self.human_render = False
+        # if self.obs_space == "dict":
+        #     self.state = {
+        #         "frames": np.zeros((STATE_H, STATE_W, self.frames_per_state)),
+        #         "human_action": np.zeros((1,)),
+        #     }
+        # elif self.obs_space == "frames":
+
+        if self.grayscale:
+            self.state = np.zeros((STATE_H, STATE_W, self.frames_per_state))
+        else:
+            self.state = np.zeros((STATE_H, STATE_W, 3))
+
+        self._steps_in_episode = 0
+
+        while True:
+            success = self._create_track()
+
+            if success:
+                if self._position_car_on_reset() is not False:
+                    break
+
+            if self.verbose > 0:
+                print(
+                    "retry to generate track (normal if there are not many of this messages)"
+                )
+
+        # there are 20 frames of noise at the begining
+        for _ in range(self.frames_per_state + 20):
+            obs = self.step(None)[0]
+
+        if self.obs_space == "dict":
+            state = obs["frames"]
+        elif self.obs_space == "frames":
+            if self.grayscale:
+                state = obs[:, :, 0 : self.frames_per_state]
+            else:
+                state = obs[:, :, 0:3]
+        else:
+            # in vector observation, we do not support the RGB observation for pilots
+            state = self.state
+
+        if self.pilot_type == "noisy_pilot":
+            self.pi_action, _ = self.pilot.predict(state)
+            if np.random.random() < self.random_action_prob:
+                self.pi_action = self.action_space.sample()
+        elif self.pilot_type == "laggy_pilot":
+            if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
+                self.pi_action, _ = self.pilot.predict(state)
+            self.laggy_pilot_counter += 1
+        elif self.pilot_type == "none_pilot":
+            self.pi_action = 0
+        elif self.pilot_type == "optimal_pilot":
+            self.pi_action, _ = self.pilot.predict(state)
+        elif self.pilot_type == "human_keyboard":
+            self.human_keyboard_input
+            self.human_keyboard_input = round(self.human_keyboard_input, 1)
+            self.pi_action = steering2action(self.human_keyboard_input)
+            print(self.human_keyboard_input)
+        elif self.pilot_type == "PID_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+        elif self.pilot_type == "PID_noisy_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+            if np.random.random() < self.random_action_prob:
+                self.pi_action = self.action_space.sample()
+        elif self.pilot_type == "PID_laggy_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+            if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
+                self.pi_action = [steering, 0.3, 0.05]
+            self.laggy_pilot_counter += 1
+
+        else:
+            AssertionError()
+
+        pi_action_steering = self._transform_action(self.pi_action)[0]
+
+        if self.obs_space == "dict":
+            obs = {"frames": state, "human_action": np.array([pi_action_steering])}
+        elif self.obs_space == "frames":
+            pi_action_steering_mapped = map_val(pi_action_steering, -1, 1, 0, 255)
+            pi_action_steering_frame = (
+                np.zeros((state.shape[0], state.shape[1]), dtype=np.int16)
+                + pi_action_steering_mapped
+            )
+            obs[:, :, -1] = pi_action_steering_frame
+        elif self.obs_space == "vector":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            obs[0] = error
+            obs[1] = pi_action_steering
+        return obs
+
+    def step(self, action):
+        self.total_timesteps += 1
+        self.total_reward += 1
+        action = self._transform_action(action)
+
+        if action is not None:
+            self._steps_in_episode += 1
+            self.car.steer(-action[0])
+            self.car.gas(action[1])
+            self.car.brake(action[2])
+
+        self.car.step(1.0 / FPS)
+        self.world.Step(1.0 / FPS, 6 * 30, 2 * 30)
+        self.t += 1.0 / FPS
+
+        # self.state = self.render("state_pixels")  # Old code, only one frame
+        self._update_state(self.render("state_pixels")[0])
+
+        step_reward = 0
+        full_step_reward = 0
+        done = False
+        if action is not None:
+            step_reward, full_step_reward, done = self.reward_fn(self)
+
+        self.car.fuel_spent = 0.0
+
+        self.reward += step_reward
+        self.full_reward += full_step_reward
+        self.statistics.loc[len(self.statistics)] = [  # type: ignore
+            self.total_timesteps,
+            self._steps_in_episode,
+            "robot_env_" + self.scenario,
+            self.total_reward,
+            self._steps_in_episode,
+            self.full_reward,
+        ]
+        if self.auto_render:
+            self.render()
+
+        # if self.obs_space == "dict":
+        #     state = self.state["frames"]
+        # elif self.obs_space == "frames":
+        #     state = self.state
+
+        if self.pilot_type == "noisy_pilot":
+            self.pi_action, _ = self.pilot.predict(self.state)
+            if np.random.random() < self.random_action_prob:
+                self.pi_action = self.action_space.sample()
+        elif self.pilot_type == "laggy_pilot":
+            if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
+                self.pi_action, _ = self.pilot.predict(self.state)
+            self.laggy_pilot_counter += 1
+        elif self.pilot_type == "none_pilot":
+            self.pi_action = 0
+        elif self.pilot_type == "optimal_pilot":
+            self.pi_action, _ = self.pilot.predict(self.state)
+        elif self.pilot_type == "human_keyboard":
+            self.human_keyboard_input = round(self.human_keyboard_input, 1)
+            self.pi_action = steering2action(self.human_keyboard_input)
+            print(self.human_keyboard_input)
+        elif self.pilot_type == "PID_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+        elif self.pilot_type == "PID_noisy_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+            if np.random.random() < self.random_action_prob:
+                self.pi_action = self.action_space.sample()
+        elif self.pilot_type == "PID_laggy_pilot":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            steering = pid(error, self.previous_error, self.Kp, self.Ki, self.Kd)
+            self.pi_action = [steering, 0.3, 0.05]
+            self.previous_error = error
+            if self.laggy_pilot_counter % self.laggy_pilot_freq == 0:
+                self.pi_action = [steering, 0.3, 0.05]
+            self.laggy_pilot_counter += 1
+        else:
+            AssertionError()
+
+        print("Env", self.pi_action)
+        pi_action_steering = self._transform_action(self.pi_action)[0]
+        # print("Env", self.pi_action)
+
+        if self.obs_space == "dict":
+            obs = {"frames": self.state, "human_action": np.array([pi_action_steering])}
+        elif self.obs_space == "frames":
+            pi_action_steering_mapped = map_val(pi_action_steering, -1, 1, 0, 255)
+            pi_action_steering_frame = (
+                np.zeros((self.state.shape[0], self.state.shape[1], 1), dtype=np.int16)
+                + pi_action_steering_mapped
+            )
+
+            obs = np.append(self.state, pi_action_steering_frame, axis=2)
+            # obs[:, :, -1] = pi_action_steering_frame
+        elif self.obs_space == "vector":
+            new_frame, rgb_state = self.render("state_pixels")
+            error = find_error(rgb_state, self.previous_error)
+            obs = np.array([error, pi_action_steering], dtype=np.float32)
+
+        # if done:
+        #     human_reward_feedback = int(
+        #         input("Please enter reward for agent either 100 or 0: ")
+        #     )
+        # else:
+        #     human_reward_feedback = 0
+
+        # step_reward += human_reward_feedback
+        return obs, step_reward, done, {}
 
 
 def play(env):
