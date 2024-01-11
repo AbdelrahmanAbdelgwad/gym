@@ -342,6 +342,12 @@ def pid(error, previous_error, Kp, Ki, Kd):
     return steering
 
 
+def reshape_state_for_nvidia(state):
+    res = cv2.resize(state, dsize=(66, 200), interpolation=cv2.INTER_CUBIC)
+    resized_state = np.array(res)
+    return resized_state
+
+
 class FrictionDetector(contactListener):
     def __init__(self, env):
         contactListener.__init__(self)
@@ -693,7 +699,9 @@ class CarRacing(gym.Env, EzPickle):
         load_tracks_from=None,
         display=None,
         scenario="train",
+        nvidia=False,
     ):
+        self.nvidia = nvidia
         self.allow_outside = allow_outside
         self.auto_render = auto_render
         self.reward_fn = reward_fn
@@ -742,7 +750,10 @@ class CarRacing(gym.Env, EzPickle):
 
         # Grayscale
         self.grayscale = grayscale
-        state_shape = [STATE_H, STATE_W]
+        if self.nvidia:
+            state_shape = [200, 66]
+        else:
+            state_shape = [STATE_H, STATE_W]
         if not self.grayscale:
             state_shape.append(3)
             if frames_per_state > 1:
@@ -2189,8 +2200,12 @@ class CarRacing(gym.Env, EzPickle):
             self.state = new_frame
 
     def _transform_action(self, action):
-        if action == None:
-            return action
+        try:
+            if len(action) > 1:
+                return action
+        except:
+            if action == None:
+                return action
         if self.discretize_actions == "residual_steering":
             if action == 0:
                 action = [0, 0.3, 0.05]
@@ -2378,7 +2393,8 @@ class CarRacing(gym.Env, EzPickle):
 
         if self.auto_render:
             self.render()
-
+        if self.nvidia:
+            self.state = reshape_state_for_nvidia(self.state)
         return self.state, step_reward, done, {}
 
     def _render_additional_objects(self):
