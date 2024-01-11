@@ -344,7 +344,6 @@ def pid(error, previous_error, Kp, Ki, Kd):
 
 def reshape_state_for_nvidia(state):
     res = cv2.resize(state, dsize=(200, 66), interpolation=cv2.INTER_CUBIC)
-    cv2.imwrite("resized_state.png", res)
     resized_state = np.array(res)
     return resized_state
 
