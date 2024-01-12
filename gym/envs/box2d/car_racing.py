@@ -2361,7 +2361,6 @@ class CarRacing(gym.Env, EzPickle):
         self.total_reward += 1
         self.total_timesteps += 1
         action = self._transform_action(action)
-        print(action, "\n")
         if action is not None:
             self._steps_in_episode += 1
             self.car.steer(-action[0])
