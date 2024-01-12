@@ -344,6 +344,7 @@ def pid(error, previous_error, Kp, Ki, Kd):
 
 def reshape_state_for_nvidia(state):
     res = cv2.resize(state, dsize=(200, 66), interpolation=cv2.INTER_CUBIC)
+    cv2.imwrite("resized_state_env.png", res)
     resized_state = np.array(res)
     return resized_state
 
@@ -817,8 +818,11 @@ class CarRacing(gym.Env, EzPickle):
         elif self.discretize_actions == "hard":
             self.action_space = spaces.Discrete(len(self.possible_hard_actions))
         else:
+            # self.action_space = spaces.Box(
+            #     np.array([-1, min_speed, 0]), np.array([+1, +1, +1]), dtype=np.float32
+            # )  # steer, gas, brake
             self.action_space = spaces.Box(
-                np.array([-1, min_speed, 0]), np.array([+1, +1, +1]), dtype=np.float32
+                np.array([-1]), np.array([+1]), dtype=np.float32
             )  # steer, gas, brake
 
         self.observation_space = spaces.Box(
@@ -2201,8 +2205,8 @@ class CarRacing(gym.Env, EzPickle):
 
     def _transform_action(self, action):
         try:
-            if len(action) > 1:
-                return action
+            if len(action) == 1:
+                return [action[0], 0.3, 0.05]
         except:
             if action == None:
                 return action
@@ -2357,7 +2361,7 @@ class CarRacing(gym.Env, EzPickle):
         self.total_reward += 1
         self.total_timesteps += 1
         action = self._transform_action(action)
-
+        print(action, "\n")
         if action is not None:
             self._steps_in_episode += 1
             self.car.steer(-action[0])
