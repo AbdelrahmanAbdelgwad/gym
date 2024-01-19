@@ -2395,6 +2395,7 @@ class CarRacing(gym.Env, EzPickle):
             self.render()
         if self.nvidia:
             self.state = reshape_state_for_nvidia(self.state)
+
         return self.state, step_reward, done, {}
 
     def _render_additional_objects(self):
