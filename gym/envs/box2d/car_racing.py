@@ -3607,9 +3607,7 @@ class CarRacingShared(CarRacing):
         else:
             AssertionError()
 
-        print("Env", self.pi_action)
         pi_action_steering = self._transform_action(self.pi_action)[0]
-        # print("Env", self.pi_action)
 
         if self.obs_space == "dict":
             obs = {"frames": self.state, "human_action": np.array([pi_action_steering])}
